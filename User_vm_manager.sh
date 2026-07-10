@@ -41,13 +41,21 @@ check_kvm() {
 # VM status and listing
 # --------------------------------------------
 get_vm_status() {
-    local pid_file="$1/pid"
+    local vm_dir="$1"
+    # Check PID file
+    local pid_file="$vm_dir/pid"
     if [[ -f "$pid_file" ]]; then
         local pid=$(cat "$pid_file")
         if ps -p "$pid" >/dev/null 2>&1; then
             echo "running"
             return
         fi
+    fi
+    # Check if any QEMU process is using this disk
+    local disk_file="$vm_dir/disk.qcow2"
+    if pgrep -f "qemu.*$disk_file" >/dev/null 2>&1; then
+        echo "running"
+        return
     fi
     echo "stopped"
 }
@@ -110,7 +118,7 @@ select_vm() {
 }
 
 # --------------------------------------------
-# Start / Restart a VM (always background)
+# Start / Restart a VM (background, no -nographic)
 # --------------------------------------------
 start_vm() {
     local vm_name="$1"
@@ -120,13 +128,23 @@ start_vm() {
     local status=$(get_vm_status "$vm_dir")
     if [[ "$status" == "running" ]]; then
         echo "🔄 VM is already running – restarting..."
-        local pid=$(cat "$vm_dir/pid")
-        kill "$pid" 2>/dev/null || true
+        # Kill using PID file
+        if [[ -f "$vm_dir/pid" ]]; then
+            local pid=$(cat "$vm_dir/pid")
+            kill "$pid" 2>/dev/null || true
+            sleep 1
+            kill -9 "$pid" 2>/dev/null || true
+            rm -f "$vm_dir/pid"
+        fi
+        # Also kill any QEMU process using this disk
+        local disk_file="$vm_dir/disk.qcow2"
+        pkill -f "qemu.*$disk_file" 2>/dev/null || true
         sleep 1
-        kill -9 "$pid" 2>/dev/null || true
-        rm -f "$vm_dir/pid"
+        # Remove stale lock file
+        rm -f "$vm_dir/disk.qcow2.lock" 2>/dev/null || true
     fi
 
+    # Build QEMU command
     local cmd="qemu-system-x86_64"
     cmd+=" -enable-kvm -m $MEMORY -smp cores=$CPUS -cpu host"
     cmd+=" -drive file=$IMAGE,format=qcow2"
@@ -140,7 +158,6 @@ start_vm() {
             cmd+=",hostfwd=tcp::$host_port-:$guest_port"
         done
     fi
-    # Headless background: use -display none (works with -daemonize)
     if [[ "$GUI" == [yY] ]]; then
         cmd+=" -vnc :0"
         echo "🖥️  VNC on port 5900 (inside container)."
@@ -170,12 +187,23 @@ stop_vm() {
         echo "⚠️  VM '$vm_name' is not running."
         return 0
     fi
-    local pid=$(cat "$vm_dir/pid")
-    echo "🛑 Stopping '$vm_name' (PID $pid)..."
-    kill "$pid" 2>/dev/null || true
-    sleep 1
-    kill -9 "$pid" 2>/dev/null || true
-    rm -f "$vm_dir/pid"
+    # Kill via PID file
+    if [[ -f "$vm_dir/pid" ]]; then
+        local pid=$(cat "$vm_dir/pid")
+        echo "🛑 Stopping '$vm_name' (PID $pid)..."
+        kill "$pid" 2>/dev/null || true
+        sleep 1
+        kill -9 "$pid" 2>/dev/null || true
+        rm -f "$vm_dir/pid"
+    else
+        # No PID file, find by disk
+        local disk_file="$vm_dir/disk.qcow2"
+        echo "🛑 Stopping '$vm_name' (no PID file, using pkill)..."
+        pkill -f "qemu.*$disk_file" 2>/dev/null || true
+        sleep 1
+    fi
+    # Remove stale lock
+    rm -f "$vm_dir/disk.qcow2.lock" 2>/dev/null || true
     echo "✅ Stopped."
 }
 
