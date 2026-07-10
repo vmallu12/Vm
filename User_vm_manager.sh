@@ -139,7 +139,7 @@ get_vm_list() {
 }
 
 # --------------------------------------------
-# 5. Interactive selection
+# 5. Interactive selection (FIXED)
 # --------------------------------------------
 select_vm() {
     local vms=($(get_vm_list))
@@ -147,7 +147,8 @@ select_vm() {
         echo "📭 No VMs found." >&2
         return 1
     fi
-    echo "📁 Found ${#vms[@]} VM(s):"
+    # Display list to stderr so it's not captured
+    echo "📁 Found ${#vms[@]} VM(s):" >&2
     local i=1
     for name in "${vms[@]}"; do
         status=$(get_vm_status "$VM_BASE_DIR/$name")
@@ -155,7 +156,7 @@ select_vm() {
             running) icon="▶️" ;;
             *) icon="💤" ;;
         esac
-        echo "   $i) $name $icon"
+        echo "   $i) $name $icon" >&2
         ((i++))
     done
     local choice
