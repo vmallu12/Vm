@@ -7,6 +7,10 @@ set -e
 VM_BASE_DIR="${VM_BASE_DIR:-$HOME/vms}"
 SSH_DEFAULT_PORT=2222
 
+# Ensure base directory exists and is absolute
+mkdir -p "$VM_BASE_DIR"
+VM_BASE_DIR=$(realpath "$VM_BASE_DIR")
+
 # --------------------------------------------
 # 1. OS detection & minimal QEMU install
 # --------------------------------------------
@@ -84,13 +88,11 @@ create_cloud_init_iso() {
 instance-id: $hostname
 local-hostname: $hostname
 EOF
-    # Hash password if openssl is available
     local hashed
     if command -v openssl &>/dev/null; then
         hashed=$(echo "$password" | openssl passwd -6 -stdin 2>/dev/null)
     fi
     if [[ -z "$hashed" ]]; then
-        # fallback to plain (works on some images)
         hashed="$password"
     fi
     cat > "$vm_dir/cloud-init/user-data" <<EOF
@@ -110,7 +112,7 @@ EOF
 }
 
 # --------------------------------------------
-# 4. VM status
+# 4. VM status and listing
 # --------------------------------------------
 get_vm_status() {
     local pid_file="$1/pid"
@@ -124,10 +126,7 @@ get_vm_status() {
     echo "stopped"
 }
 
-# --------------------------------------------
-# 5. Menu functions
-# --------------------------------------------
-list_vms() {
+get_vm_list() {
     local vms=()
     if [[ -d "$VM_BASE_DIR" ]]; then
         for d in "$VM_BASE_DIR"/*/; do
@@ -136,8 +135,16 @@ list_vms() {
             fi
         done
     fi
+    echo "${vms[@]}"
+}
+
+# --------------------------------------------
+# 5. Interactive selection
+# --------------------------------------------
+select_vm() {
+    local vms=($(get_vm_list))
     if [[ ${#vms[@]} -eq 0 ]]; then
-        echo "📭 No VMs found."
+        echo "📭 No VMs found." >&2
         return 1
     fi
     echo "📁 Found ${#vms[@]} VM(s):"
@@ -151,30 +158,29 @@ list_vms() {
         echo "   $i) $name $icon"
         ((i++))
     done
-    return 0
-}
-
-select_vm() {
-    list_vms || return 1
     local choice
     read -p "🎯 Select VM (number or name): " choice
     if [[ "$choice" =~ ^[0-9]+$ ]]; then
-        local names=($(ls "$VM_BASE_DIR" 2>/dev/null | grep -v '^$'))
         local idx=$((choice-1))
-        if [[ $idx -ge 0 && $idx -lt ${#names[@]} ]]; then
-            echo "${names[$idx]}"
+        if [[ $idx -ge 0 && $idx -lt ${#vms[@]} ]]; then
+            echo "${vms[$idx]}"
             return 0
         fi
     else
-        if [[ -d "$VM_BASE_DIR/$choice" ]]; then
-            echo "$choice"
-            return 0
-        fi
+        for name in "${vms[@]}"; do
+            if [[ "$name" == "$choice" ]]; then
+                echo "$name"
+                return 0
+            fi
+        done
     fi
     echo "❌ Invalid selection." >&2
     return 1
 }
 
+# --------------------------------------------
+# 6. VM operations
+# --------------------------------------------
 create_vm() {
     echo "🆕 Creating a new VM"
     echo "🌍 Select OS:"
@@ -238,18 +244,15 @@ create_vm() {
     gui=${gui:-n}
     read -p "🌐 Extra port forwards (e.g., 8080:80): " extra_ports
 
-    # Download image
     local image_file="$vm_dir/disk.qcow2"
     download_image "$url" "$image_file" "$disk"
 
-    # Cloud-init for Ubuntu/Debian
     local cloud_iso=""
     if [[ "$os_choice" =~ ^(1|4|7|8|9)$ ]]; then
         echo "📝 Generating cloud-init ISO..."
         cloud_iso=$(create_cloud_init_iso "$vm_dir" "$username" "$password" "$hostname")
     fi
 
-    # Save config
     cat > "$vm_dir/config.conf" <<EOF
 VM_NAME=$vm_name
 HOSTNAME=$hostname
@@ -293,7 +296,6 @@ start_vm() {
             cmd+=",hostfwd=tcp::$host_port-:$guest_port"
         done
     fi
-    # Disable floppy to avoid I/O errors
     cmd+=" -fda none"
     if [[ "$GUI" == [yY] ]]; then
         cmd+=" -vnc :0"
@@ -363,7 +365,7 @@ delete_vm() {
 }
 
 # --------------------------------------------
-# 6. Main menu
+# 7. Main menu
 # --------------------------------------------
 main_menu() {
     echo ""
@@ -387,7 +389,7 @@ main_menu() {
 }
 
 # --------------------------------------------
-# 7. Init
+# 8. Init
 # --------------------------------------------
 init() {
     mkdir -p "$VM_BASE_DIR"
