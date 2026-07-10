@@ -42,7 +42,6 @@ check_kvm() {
 # --------------------------------------------
 get_vm_status() {
     local vm_dir="$1"
-    # Check PID file
     local pid_file="$vm_dir/pid"
     if [[ -f "$pid_file" ]]; then
         local pid=$(cat "$pid_file")
@@ -51,7 +50,6 @@ get_vm_status() {
             return
         fi
     fi
-    # Check if any QEMU process is using this disk
     local disk_file="$vm_dir/disk.qcow2"
     if pgrep -f "qemu.*$disk_file" >/dev/null 2>&1; then
         echo "running"
@@ -70,6 +68,27 @@ get_vm_list() {
         done
     fi
     echo "${vms[@]}"
+}
+
+# --------------------------------------------
+# Force-clean a VM's disk lock
+# --------------------------------------------
+force_cleanup() {
+    local vm_dir="$1"
+    local disk_file="$vm_dir/disk.qcow2"
+    
+    echo "🧹 Cleaning up stale processes for $disk_file..." >&2
+    pids=$(pgrep -f "qemu.*$disk_file" 2>/dev/null || true)
+    if [[ -n "$pids" ]]; then
+        echo "Killing PIDs: $pids" >&2
+        kill -9 $pids 2>/dev/null || true
+        sleep 1
+    fi
+    rm -f "$vm_dir/pid"
+    if [[ -f "$disk_file.lock" ]]; then
+        echo "Removing lock file: $disk_file.lock" >&2
+        rm -f "$disk_file.lock"
+    fi
 }
 
 # --------------------------------------------
@@ -118,7 +137,7 @@ select_vm() {
 }
 
 # --------------------------------------------
-# Start / Restart a VM (background, no -nographic)
+# Start / Restart a VM (with cleanup)
 # --------------------------------------------
 start_vm() {
     local vm_name="$1"
@@ -128,23 +147,14 @@ start_vm() {
     local status=$(get_vm_status "$vm_dir")
     if [[ "$status" == "running" ]]; then
         echo "🔄 VM is already running – restarting..."
-        # Kill using PID file
-        if [[ -f "$vm_dir/pid" ]]; then
-            local pid=$(cat "$vm_dir/pid")
-            kill "$pid" 2>/dev/null || true
-            sleep 1
-            kill -9 "$pid" 2>/dev/null || true
-            rm -f "$vm_dir/pid"
+        force_cleanup "$vm_dir"
+    else
+        if [[ -f "$vm_dir/disk.qcow2.lock" ]]; then
+            echo "⚠️  Stale lock file found – cleaning up..."
+            force_cleanup "$vm_dir"
         fi
-        # Also kill any QEMU process using this disk
-        local disk_file="$vm_dir/disk.qcow2"
-        pkill -f "qemu.*$disk_file" 2>/dev/null || true
-        sleep 1
-        # Remove stale lock file
-        rm -f "$vm_dir/disk.qcow2.lock" 2>/dev/null || true
     fi
 
-    # Build QEMU command
     local cmd="qemu-system-x86_64"
     cmd+=" -enable-kvm -m $MEMORY -smp cores=$CPUS -cpu host"
     cmd+=" -drive file=$IMAGE,format=qcow2"
@@ -187,23 +197,21 @@ stop_vm() {
         echo "⚠️  VM '$vm_name' is not running."
         return 0
     fi
-    # Kill via PID file
-    if [[ -f "$vm_dir/pid" ]]; then
-        local pid=$(cat "$vm_dir/pid")
+    local pid_file="$vm_dir/pid"
+    if [[ -f "$pid_file" ]]; then
+        local pid=$(cat "$pid_file")
         echo "🛑 Stopping '$vm_name' (PID $pid)..."
         kill "$pid" 2>/dev/null || true
         sleep 1
         kill -9 "$pid" 2>/dev/null || true
-        rm -f "$vm_dir/pid"
+        rm -f "$pid_file"
     else
-        # No PID file, find by disk
         local disk_file="$vm_dir/disk.qcow2"
         echo "🛑 Stopping '$vm_name' (no PID file, using pkill)..."
         pkill -f "qemu.*$disk_file" 2>/dev/null || true
         sleep 1
     fi
-    # Remove stale lock
-    rm -f "$vm_dir/disk.qcow2.lock" 2>/dev/null || true
+    rm -f "$vm_dir/disk.qcow2.lock"
     echo "✅ Stopped."
 }
 
