@@ -29,11 +29,11 @@ install_qemu() {
 
 check_kvm() {
     if [ ! -e /dev/kvm ]; then
-        echo "❌ /dev/kvm missing – mount it with -v /dev/kvm:/dev/kvm"
+        echo "❌ /dev/kvm missing – mount it with -v /dev/kvm:/dev/kvm" >&2
         exit 1
     fi
     if [ ! -w /dev/kvm ]; then
-        echo "❌ /dev/kvm not writable – run with --privileged or --group-add=$(stat -c '%g' /dev/kvm)"
+        echo "❌ /dev/kvm not writable – run with --privileged or --group-add=$(stat -c '%g' /dev/kvm)" >&2
         exit 1
     fi
 }
@@ -66,15 +66,15 @@ get_vm_list() {
 }
 
 # --------------------------------------------
-# Select a VM
+# Select a VM (FIXED: output to stderr)
 # --------------------------------------------
 select_vm() {
     local vms=($(get_vm_list))
     if [[ ${#vms[@]} -eq 0 ]]; then
-        echo "📭 No VMs found. Create one first with the full manager."
+        echo "📭 No VMs found. Create one first with the full manager." >&2
         return 1
     fi
-    echo "📁 Available VMs:"
+    echo "📁 Available VMs:" >&2
     local i=1
     for name in "${vms[@]}"; do
         status=$(get_vm_status "$VM_BASE_DIR/$name")
@@ -82,7 +82,7 @@ select_vm() {
             running) icon="▶️" ;;
             *) icon="💤" ;;
         esac
-        echo "   $i) $name $icon"
+        echo "   $i) $name $icon" >&2
         ((i++))
     done
     local choice
@@ -113,7 +113,6 @@ start_vm() {
     local vm_dir="$VM_BASE_DIR/$vm_name"
     source "$vm_dir/config.conf"
 
-    # If running, stop it first (restart)
     local status=$(get_vm_status "$vm_dir")
     if [[ "$status" == "running" ]]; then
         echo "🔄 VM is already running – restarting..."
@@ -145,7 +144,6 @@ start_vm() {
     fi
 
     echo "🚀 Starting '$vm_name' (SSH port $SSH_PORT)..."
-    # Run in background by default (daemonize)
     cmd+=" -daemonize -pidfile $vm_dir/pid"
     eval $cmd
     sleep 1
