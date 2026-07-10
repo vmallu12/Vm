@@ -147,7 +147,6 @@ select_vm() {
         echo "📭 No VMs found." >&2
         return 1
     fi
-    # Display list to stderr so it's not captured
     echo "📁 Found ${#vms[@]} VM(s):" >&2
     local i=1
     for name in "${vms[@]}"; do
@@ -297,7 +296,7 @@ start_vm() {
             cmd+=",hostfwd=tcp::$host_port-:$guest_port"
         done
     fi
-    cmd+=" -fda none"
+    # Floppy disabled – we don't add -fda at all
     if [[ "$GUI" == [yY] ]]; then
         cmd+=" -vnc :0"
         echo "🖥️  VNC on port 5900 (inside container)."
