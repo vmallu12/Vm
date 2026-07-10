@@ -7,12 +7,11 @@ set -e
 VM_BASE_DIR="${VM_BASE_DIR:-$HOME/vms}"
 SSH_DEFAULT_PORT=2222
 
-# Ensure base directory exists
 mkdir -p "$VM_BASE_DIR"
 VM_BASE_DIR=$(realpath "$VM_BASE_DIR")
 
 # --------------------------------------------
-# Minimal QEMU/KVM setup (if not already installed)
+# Minimal QEMU/KVM setup
 # --------------------------------------------
 install_qemu() {
     if command -v apk &>/dev/null; then
@@ -66,12 +65,12 @@ get_vm_list() {
 }
 
 # --------------------------------------------
-# Select a VM (FIXED: output to stderr)
+# Select a VM (FIXED - all UI to stderr)
 # --------------------------------------------
 select_vm() {
     local vms=($(get_vm_list))
     if [[ ${#vms[@]} -eq 0 ]]; then
-        echo "📭 No VMs found. Create one first with the full manager." >&2
+        echo "📭 No VMs found." >&2
         return 1
     fi
     echo "📁 Available VMs:" >&2
@@ -87,22 +86,27 @@ select_vm() {
     done
     local choice
     read -p "🎯 Select VM (number or name): " choice
+    local selected=""
     if [[ "$choice" =~ ^[0-9]+$ ]]; then
         local idx=$((choice-1))
         if [[ $idx -ge 0 && $idx -lt ${#vms[@]} ]]; then
-            echo "${vms[$idx]}"
-            return 0
+            selected="${vms[$idx]}"
         fi
     else
         for name in "${vms[@]}"; do
             if [[ "$name" == "$choice" ]]; then
-                echo "$name"
-                return 0
+                selected="$name"
+                break
             fi
         done
     fi
-    echo "❌ Invalid selection." >&2
-    return 1
+    if [[ -n "$selected" && -d "$VM_BASE_DIR/$selected" && -f "$VM_BASE_DIR/$selected/config.conf" ]]; then
+        echo "$selected"
+        return 0
+    else
+        echo "❌ Invalid selection." >&2
+        return 1
+    fi
 }
 
 # --------------------------------------------
