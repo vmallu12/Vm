@@ -65,7 +65,7 @@ get_vm_list() {
 }
 
 # --------------------------------------------
-# Select a VM (FIXED - all UI to stderr)
+# Select a VM (all UI to stderr)
 # --------------------------------------------
 select_vm() {
     local vms=($(get_vm_list))
@@ -110,7 +110,7 @@ select_vm() {
 }
 
 # --------------------------------------------
-# Start / Restart a VM
+# Start / Restart a VM (daemonized, no -nographic)
 # --------------------------------------------
 start_vm() {
     local vm_name="$1"
@@ -140,11 +140,12 @@ start_vm() {
             cmd+=",hostfwd=tcp::$host_port-:$guest_port"
         done
     fi
+    # Display handling: use -display none for headless background, or -vnc for GUI
     if [[ "$GUI" == [yY] ]]; then
         cmd+=" -vnc :0"
         echo "🖥️  VNC on port 5900 (inside container)."
     else
-        cmd+=" -nographic"
+        cmd+=" -display none"
     fi
 
     echo "🚀 Starting '$vm_name' (SSH port $SSH_PORT)..."
